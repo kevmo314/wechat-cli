@@ -21,6 +21,18 @@ type chatLineRef struct {
 }
 
 func (m *chatModel) refreshHistory(bottom bool) {
+	// Keep scrollback attached to its message when sync inserts earlier messages
+	// or changes wrapping. A numeric line offset alone points at different text.
+	anchorID, anchorLine := "", 0
+	if !bottom {
+		for i := m.viewport.YOffset; i < len(m.historyHits); i++ {
+			id := m.historyHits[i].MessageID
+			if start, ok := m.messageStarts[id]; id != "" && ok {
+				anchorID, anchorLine = id, m.viewport.YOffset-start
+				break
+			}
+		}
+	}
 	var lines []string
 	m.historyHits = nil
 	m.messageStarts = map[string]int{}
@@ -117,6 +129,12 @@ func (m *chatModel) refreshHistory(bottom bool) {
 		if m.chatVisible() {
 			m.unread[m.selected] = 0
 		}
+	} else if start, ok := m.messageStarts[anchorID]; ok {
+		end := start + 1
+		for end < len(m.historyHits) && m.historyHits[end].MessageID == anchorID {
+			end++
+		}
+		m.viewport.SetYOffset(min(start+anchorLine, end-1))
 	}
 }
 func (m chatModel) selectedMessage() (native.Message, bool) {

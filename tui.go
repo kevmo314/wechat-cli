@@ -351,7 +351,10 @@ func (m *chatModel) rebuildRows() {
 		if m.rows[i].Last.Timestamp != m.rows[j].Last.Timestamp {
 			return m.rows[i].Last.Timestamp > m.rows[j].Last.Timestamp
 		}
-		return m.name(m.rows[i].Peer) < m.name(m.rows[j].Peer)
+		if a, b := m.name(m.rows[i].Peer), m.name(m.rows[j].Peer); a != b {
+			return a < b
+		}
+		return m.rows[i].Peer < m.rows[j].Peer
 	})
 	if len(m.rows) == 0 && m.newChat && strings.TrimSpace(m.query) != "" && !strings.ContainsAny(m.query, " \n\r\t") {
 		m.rows = []chatConversation{{Peer: strings.TrimSpace(m.query)}}
@@ -411,6 +414,7 @@ func (m *chatModel) setFocus(focus int) tea.Cmd {
 	return nil
 }
 func (m *chatModel) resize(w, h int) {
+	bottom := m.viewport.AtBottom()
 	m.width = w
 	m.height = h
 	left := min(34, max(24, w/3))
@@ -421,7 +425,7 @@ func (m *chatModel) resize(w, h int) {
 	m.viewport.Width = inner
 	m.viewport.Height = max(1, h-12)
 	m.ensureListVisible()
-	m.refreshHistory(true)
+	m.refreshHistory(bottom)
 }
 func (m *chatModel) submit() tea.Cmd {
 	if m.sending || m.selected == "" {
@@ -598,7 +602,6 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		priorUnread := m.totalUnread()
-		beforeActivity := m.activityClock
 		bottom := m.viewport.AtBottom()
 		for peer, c := range msg.Contacts {
 			previous := m.contacts[peer]
@@ -610,9 +613,6 @@ func (m chatModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.addMessages(msg.Messages, true)
 		m.rebuildRows()
-		if m.activityClock > beforeActivity {
-			m.listOffset = 0
-		}
 		m.refreshHistory(bottom)
 		m.lastSync = time.Now()
 		m.syncErr = ""
