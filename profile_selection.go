@@ -53,6 +53,7 @@ func profileStore(base Store, configRoot, requested string, explicitDir bool) (S
 	if profile == native.AndroidTabletProfile {
 		candidates = append(candidates, Store{filepath.Join(configRoot, "wechat-tablet")})
 	}
+	var matches []Store
 	for _, candidate := range candidates {
 		state, err := (nativeStore{filepath.Join(candidate.Dir, "native")}).state()
 		if err != nil {
@@ -64,55 +65,80 @@ func profileStore(base Store, configRoot, requested string, explicitDir bool) (S
 		if state.Account != nil {
 			saved, _ := native.NormalizeProfile(state.Account.Profile)
 			if saved == profile {
-				return candidate, nil
+				matches = append(matches, candidate)
 			}
 		}
+	}
+	if len(matches) > 1 {
+		paths := make([]string, len(matches))
+		for i, match := range matches {
+			paths[i] = fmt.Sprintf("%q", match.Dir)
+		}
+		return Store{}, fmt.Errorf("multiple saved %s profiles found in %s; use --config-dir DIR to select one explicitly", profile, strings.Join(paths, ", "))
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
 	}
 	return target, nil
 }
 func loginProfileArgument(args []string) (string, bool, error) {
-	for i, arg := range args {
-		arg = strings.TrimLeft(arg, "-")
-		if value, ok := strings.CutPrefix(arg, "profile="); ok {
-			p, err := native.NormalizeProfile(value)
-			return p, true, err
-		}
-		if arg == "profile" {
-			if i+1 == len(args) {
-				return "", true, fmt.Errorf("--profile needs a value")
-			}
-			p, err := native.NormalizeProfile(args[i+1])
-			return p, true, err
-		}
-	}
-	return "", false, nil
+	opts, err := parseNativeLoginOptions(args)
+	return opts.profile, opts.profileExplicit, err
 }
 
 type profilePreference struct {
 	Profile string `json:"profile"`
 }
 
-func preferredProfileStore(base Store, configRoot string, custom ...bool) Store {
+func preferredProfileStore(base Store, configRoot string, custom ...bool) (Store, error) {
 	explicit := len(custom) > 0 && custom[0]
 	var preference profilePreference
 	if err := (nativeStore{base.Dir}).load("preferences.json", &preference); err == nil && preference.Profile != "" {
-		if selected, err := profileStore(base, configRoot, preference.Profile, explicit); err == nil {
-			state, err := (nativeStore{filepath.Join(selected.Dir, "native")}).state()
-			if err == nil && state.Account != nil {
-				return selected
-			}
+		selected, err := profileStore(base, configRoot, preference.Profile, explicit)
+		if err != nil {
+			return Store{}, err
+		}
+		state, err := (nativeStore{filepath.Join(selected.Dir, "native")}).state()
+		if err != nil {
+			return Store{}, err
+		}
+		if state.Account != nil {
+			return selected, nil
 		}
 	}
 	if explicit {
-		return base
+		return base, nil
 	}
-	if tablet, err := profileStore(base, configRoot, native.AndroidTabletProfile, false); err == nil {
-		state, err := (nativeStore{filepath.Join(tablet.Dir, "native")}).state()
-		if err == nil && state.Account != nil {
-			return tablet
-		}
+	tablet, err := profileStore(base, configRoot, native.AndroidTabletProfile, false)
+	if err != nil {
+		return Store{}, err
 	}
-	return base
+	state, err := (nativeStore{filepath.Join(tablet.Dir, "native")}).state()
+	if err != nil {
+		return Store{}, err
+	}
+	if state.Account != nil {
+		return tablet, nil
+	}
+	state, err = (nativeStore{filepath.Join(base.Dir, "native")}).state()
+	if err != nil {
+		return Store{}, err
+	}
+	if state.Account != nil {
+		return profileStore(base, configRoot, state.Account.Profile, false)
+	}
+	desktop, err := profileStore(base, configRoot, native.DesktopProfile, false)
+	if err != nil {
+		return Store{}, err
+	}
+	state, err = (nativeStore{filepath.Join(desktop.Dir, "native")}).state()
+	if err != nil {
+		return Store{}, err
+	}
+	if state.Account != nil {
+		return desktop, nil
+	}
+	return base, nil
 }
 func rememberProfile(base Store, profile string) error {
 	if err := base.init(); err != nil {

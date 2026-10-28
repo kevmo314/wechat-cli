@@ -21,6 +21,8 @@ go build -o bin/wechat .
 
 Choose `--profile phone`, `--profile tablet`, or `--profile desktop`. Each profile keeps separate credentials. The TUI remembers your selected profile and lets you change it with Ctrl+P. Existing tablet state in `~/.config/wechat-tablet` is recognized. Global flags precede the command.
 
+`wechat login --profile tablet` selects the same account directory as `wechat --profile tablet login`. Without a profile flag, `login` uses desktop. If matching saved profiles exist in multiple directories, the CLI reports the paths instead of choosing one silently. Select the intended session and its archive with `wechat --config-dir DIR --profile desktop status` (or `read` / `tui`); existing files are preserved.
+
 The terminal QR uses explicit black-on-white colors. Server PNG/JPEG QR images are scanned and rerendered as terminal blocks. `login --qr login.png` also saves an image; `login --resume` resumes an unexpired attempt. New-device phone/LAN verification challenges are detected but not implemented.
 
 ## Terminal interface

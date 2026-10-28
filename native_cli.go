@@ -271,30 +271,46 @@ func nativeCommand(ctx context.Context, store Store, command string, args []stri
 	}
 }
 
-func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string) error {
+type nativeLoginOptions struct {
+	qr              string
+	timeout         time.Duration
+	resume          bool
+	profile         string
+	profileExplicit bool
+}
+
+func parseNativeLoginOptions(args []string) (nativeLoginOptions, error) {
+	var opts nativeLoginOptions
 	f := flags("login")
-	png := f.String("qr", "", "also save the native QR as PNG")
-	timeout := f.Duration("timeout", 8*time.Minute, "overall login timeout")
-	resume := f.Bool("resume", false, "resume the saved QR/approval attempt")
-	profile := f.String("profile", native.DesktopProfile, "phone, tablet, or desktop (use a separate --config-dir)")
+	f.StringVar(&opts.qr, "qr", "", "also save the native QR as PNG")
+	f.DurationVar(&opts.timeout, "timeout", 8*time.Minute, "overall login timeout")
+	f.BoolVar(&opts.resume, "resume", false, "resume the saved QR/approval attempt")
+	f.StringVar(&opts.profile, "profile", native.DesktopProfile, "phone, tablet, or desktop (use a separate --config-dir)")
 	if err := parse(f, args); err != nil {
-		return err
+		return opts, err
 	}
-	canonicalProfile, err := native.NormalizeProfile(*profile)
+	profile, err := native.NormalizeProfile(opts.profile)
+	if err != nil {
+		return opts, err
+	}
+	opts.profile = profile
+	f.Visit(func(v *flag.Flag) {
+		if v.Name == "profile" {
+			opts.profileExplicit = true
+		}
+	})
+	return opts, nil
+}
+
+func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string) error {
+	opts, err := parseNativeLoginOptions(args)
 	if err != nil {
 		return err
 	}
-	*profile = canonicalProfile
-	profileExplicit := false
-	f.Visit(func(v *flag.Flag) {
-		if v.Name == "profile" {
-			profileExplicit = true
-		}
-	})
-	if *timeout <= 0 {
+	if opts.timeout <= 0 {
 		return errors.New("timeout must be positive")
 	}
-	ctx, cancel := context.WithTimeout(ctx, *timeout)
+	ctx, cancel := context.WithTimeout(ctx, opts.timeout)
 	defer cancel()
 	reader, err := store.readerLock()
 	if err != nil {
@@ -315,7 +331,7 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 	}
 	host := "long.weixin.qq.com"
 	var attempt *native.LoginAttempt
-	if *resume {
+	if opts.resume {
 		attempt = &native.LoginAttempt{}
 		if err = s.load("login.json", attempt); err != nil {
 			return err
@@ -325,7 +341,7 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 		if storedProfile == "" {
 			storedProfile = native.DesktopProfile
 		}
-		if profileExplicit && storedProfile != *profile {
+		if opts.profileExplicit && storedProfile != opts.profile {
 			return errors.New("saved login uses a different profile; start a fresh login or use its matching --profile")
 		}
 		if storedProfile != native.DesktopProfile && storedProfile != native.AndroidTabletProfile && storedProfile != native.PhoneProfile {
@@ -341,7 +357,7 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 	}
 	defer connection.Close()
 	if attempt == nil {
-		attempt, err = connection.StartLoginWithProfile(ctx, host, *profile)
+		attempt, err = connection.StartLoginWithProfile(ctx, host, opts.profile)
 		if err != nil {
 			return err
 		}
@@ -362,7 +378,7 @@ func nativeLogin(ctx context.Context, store Store, s nativeStore, args []string)
 			mime = "image/jpeg"
 		}
 		content := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(attempt.Image)
-		if err = displayLoginQR(ctx, newClient(defaultBaseURL, "").HTTP, os.Stderr, QRCode{Content: content}, *png); err != nil {
+		if err = displayLoginQR(ctx, newClient(defaultBaseURL, "").HTTP, os.Stderr, QRCode{Content: content}, opts.qr); err != nil {
 			return err
 		}
 	}

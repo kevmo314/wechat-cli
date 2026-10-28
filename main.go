@@ -108,6 +108,20 @@ func run(ctx context.Context, args []string) error {
 			}
 			requested = canonical
 		}
+		loginProfilePresent := false
+		if command == "login" {
+			local, present, err := loginProfileArgument(args)
+			if err != nil {
+				return err
+			}
+			loginProfilePresent = present
+			if requested != "" && present && local != requested {
+				return errors.New("global and login --profile options disagree")
+			}
+			if requested == "" {
+				requested = local
+			}
+		}
 		if command == "tui" {
 			for {
 				chosen := store
@@ -117,7 +131,10 @@ func run(ctx context.Context, args []string) error {
 						return err
 					}
 				} else {
-					chosen = preferredProfileStore(store, config, explicitDir)
+					chosen, err = preferredProfileStore(store, config, explicitDir)
+					if err != nil {
+						return err
+					}
 				}
 				if requested != "" {
 					if err = rememberProfile(store, requested); err != nil {
@@ -134,24 +151,18 @@ func run(ctx context.Context, args []string) error {
 			}
 		}
 		if requested == "" {
-			store = preferredProfileStore(store, config, explicitDir)
+			store, err = preferredProfileStore(store, config, explicitDir)
+			if err != nil {
+				return err
+			}
 		}
 		if requested != "" {
 			store, err = profileStore(store, config, requested, explicitDir)
 			if err != nil {
 				return err
 			}
-			if command == "login" {
-				local, present, err := loginProfileArgument(args)
-				if err != nil {
-					return err
-				}
-				if present && local != requested {
-					return errors.New("global and login --profile options disagree")
-				}
-				if !present {
-					args = append(args, "--profile", requested)
-				}
+			if command == "login" && *profile != "" && !loginProfilePresent {
+				args = append(args, "--profile", requested)
 			}
 		}
 		return nativeCommand(ctx, store, command, args)
